@@ -19,6 +19,13 @@ ROOT = os.path.dirname(__file__)
 logger = logging.getLogger("pc")
 pcs = set()
 
+face_detect = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+mask_model_path = "mask_model.tflite"
+a_g_model_path = "age_gender_model.tflite"
+
+mask_model = TfLiteModel(mask_model_path)
+a_g_model = TfLiteModel(a_g_model_path)
+
 
 class VideoTransformTrack(MediaStreamTrack):
     """
@@ -35,16 +42,61 @@ class VideoTransformTrack(MediaStreamTrack):
     async def recv(self):
         frame = await self.track.recv()
 
-        if self.transform == "cartoon":
+        if self.transform == "Mask-detection":
             # define , load models
-            face_detect = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-            mask_model_path = "mask_model.tflite"
-            a_g_model_path = "age_gender_model.tflite"
-            not_found = cv2.imread('notfound.jpg')
+            img = frame.to_ndarray(format="bgr24")
+            faces = face_detect.detectMultiScale(img, scaleFactor=1.1, minNeighbors=4)
 
-            mask_model = TfLiteModel(mask_model_path)
-            a_g_model = TfLiteModel(a_g_model_path)
+            for (x, y, w, h) in faces:
+                # face images processing
+                face_img = img[y:y + h, x:x + w]
+                face_img1 = input_process(face_img)
 
+                # predict mask / no mask
+
+                mask_pred = mask_model.model_predict(face_img1)
+
+                if mask_pred > 0:  # no mask
+                    color = (0, 0, 255)
+                    text = 'No Mask'
+                else:
+                    text = 'MASK'
+                    color = (0, 255, 0)
+                cv2.putText(img, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
+
+            # rebuild a VideoFrame, preserving timing information
+            new_frame = VideoFrame.from_ndarray(img, format="bgr24")
+            new_frame.pts = frame.pts
+            new_frame.time_base = frame.time_base
+            return new_frame
+        elif self.transform == "Age-Gender-detect":
+            # perform edge detection
+            img = frame.to_ndarray(format="bgr24")
+            faces = face_detect.detectMultiScale(img, scaleFactor=1.1, minNeighbors=4)
+
+            for (x, y, w, h) in faces:
+                # face images processing
+                face_img = img[y:y + h, x:x + w]
+                face_img2 = input_process(face_img, shape=(64, 64))
+                gender_pred, age_pred = a_g_model.model_predict(face_img2)
+                if gender_pred[0][0] > 0.5:
+                    gender = 'Female'
+                else:
+                    gender = 'Male'
+                ages = np.arange(0, 101).reshape(101, 1)
+                age_pred = age_pred.dot(ages).flatten()
+                color = (0, 0, 255)
+                text = gender + '  ' + str(int(age_pred))
+                cv2.putText(img, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
+            # rebuild a VideoFrame, preserving timing information
+            new_frame = VideoFrame.from_ndarray(img, format="bgr24")
+            new_frame.pts = frame.pts
+            new_frame.time_base = frame.time_base
+            return new_frame
+        elif self.transform == "Detect-all":
+            # rotate image
             img = frame.to_ndarray(format="bgr24")
             faces = face_detect.detectMultiScale(img, scaleFactor=1.1, minNeighbors=4)
 
@@ -74,28 +126,6 @@ class VideoTransformTrack(MediaStreamTrack):
                     color = (0, 255, 0)
                 cv2.putText(img, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-
-            # rebuild a VideoFrame, preserving timing information
-            new_frame = VideoFrame.from_ndarray(img, format="bgr24")
-            new_frame.pts = frame.pts
-            new_frame.time_base = frame.time_base
-            return new_frame
-        elif self.transform == "edges":
-            # perform edge detection
-            img = frame.to_ndarray(format="bgr24")
-            img = cv2.cvtColor(cv2.Canny(img, 100, 200), cv2.COLOR_GRAY2BGR)
-
-            # rebuild a VideoFrame, preserving timing information
-            new_frame = VideoFrame.from_ndarray(img, format="bgr24")
-            new_frame.pts = frame.pts
-            new_frame.time_base = frame.time_base
-            return new_frame
-        elif self.transform == "rotate":
-            # rotate image
-            img = frame.to_ndarray(format="bgr24")
-            rows, cols, _ = img.shape
-            M = cv2.getRotationMatrix2D((cols / 2, rows / 2), frame.time * 45, 1)
-            img = cv2.warpAffine(img, M, (cols, rows))
 
             # rebuild a VideoFrame, preserving timing information
             new_frame = VideoFrame.from_ndarray(img, format="bgr24")
@@ -134,14 +164,15 @@ async def offer(request):
     def log_info(msg, *args):
         logger.info(pc_id + " " + msg, *args)
 
-        log_info("Created for %s", request.remote)
+    log_info("Created for %s", request.remote)
 
     # prepare local media
-    #player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
-   # if args.write_audio:
-  #      recorder = MediaRecorder(args.write_audio)
-  #  else:
-   #     recorder = MediaBlackhole()
+    # player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
+    '''if args.write_audio:
+        recorder = MediaRecorder(args.write_audio)
+    else:
+        recorder = MediaBlackhole()
+'''
 
     @pc.on("datachannel")
     def on_datachannel(channel):
@@ -152,32 +183,29 @@ async def offer(request):
 
     @pc.on("iceconnectionstatechange")
     async def on_iceconnectionstatechange():
-        # log_info("ICE connection state is %s", pc.iceConnectionState)
+        log_info("ICE connection state is %s", pc.iceConnectionState)
         if pc.iceConnectionState == "failed":
             await pc.close()
             pcs.discard(pc)
 
     @pc.on("track")
     def on_track(track):
-        # log_info("Track %s received", track.kind)
+        log_info("Track %s received", track.kind)
 
-       # if track.kind == "audio":
-        #    pc.addTrack(player.audio)
-       #     recorder.addTrack(track)
         if track.kind == "video":
             local_video = VideoTransformTrack(
                 track, transform=params["video_transform"]
             )
             pc.addTrack(local_video)
 
-        #@track.on("ended")
-       # async def on_ended():
-            # log_info("Track %s ended", track.kind)
-        #    await recorder.stop()
+        @track.on("ended")
+        async def on_ended():
+            log_info("Track %s ended", track.kind)
+            # await recorder.stop()
 
     # handle offer
     await pc.setRemoteDescription(offer)
-    #await recorder.start()
+    # await recorder.start()
 
     # send answer
     answer = await pc.createAnswer()
