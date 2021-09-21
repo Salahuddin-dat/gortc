@@ -1,6 +1,5 @@
 // get DOM elements
-var dataChannelLog = document.getElementById('data-channel'),
-    iceConnectionLog = document.getElementById('ice-connection-state'),
+   var iceConnectionLog = document.getElementById('ice-connection-state'),
     iceGatheringLog = document.getElementById('ice-gathering-state'),
     signalingLog = document.getElementById('signaling-state');
 
@@ -14,11 +13,11 @@ function createPeerConnection() {
     var config = {
         sdpSemantics: 'unified-plan'
     };
-
-    if (document.getElementById('use-stun').checked) {
-        config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
-    }
-
+///
+    //if (document.getElementById('use-stun').checked) {
+   //     config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
+    //}
+    config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
     pc = new RTCPeerConnection(config);
 
     // register some listeners to help debugging
@@ -41,7 +40,7 @@ function createPeerConnection() {
     pc.addEventListener('track', function(evt) {
         if (evt.track.kind == 'video')
             document.getElementById('video').srcObject = evt.streams[0];
-        else
+        else ///
             document.getElementById('audio').srcObject = evt.streams[0];
     });
 
@@ -69,18 +68,16 @@ function negotiate() {
     }).then(function() {
         var offer = pc.localDescription;
         var codec;
+        ///
+       // codec = document.getElementById('audio-codec').value;
+      //  if (codec !== 'default') {
+       //     offer.sdp = sdpFilterCodec('audio', codec, offer.sdp);
+       // }
+         ///
+        codec = 'default';
 
-        codec = document.getElementById('audio-codec').value;
-        if (codec !== 'default') {
-            offer.sdp = sdpFilterCodec('audio', codec, offer.sdp);
-        }
 
-        codec = document.getElementById('video-codec').value;
-        if (codec !== 'default') {
-            offer.sdp = sdpFilterCodec('video', codec, offer.sdp);
-        }
-
-        document.getElementById('offer-sdp').textContent = offer.sdp;
+        //document.getElementById('offer-sdp').textContent = offer.sdp;
         return fetch('/offer', {
             body: JSON.stringify({
                 sdp: offer.sdp,
@@ -95,7 +92,7 @@ function negotiate() {
     }).then(function(response) {
         return response.json();
     }).then(function(answer) {
-        document.getElementById('answer-sdp').textContent = answer.sdp;
+        //document.getElementById('answer-sdp').textContent = answer.sdp;
         return pc.setRemoteDescription(answer);
     }).catch(function(e) {
         alert(e);
@@ -118,9 +115,9 @@ function start() {
         }
     }
 
-    if (document.getElementById('use-datachannel').checked) {
-        var parameters = JSON.parse(document.getElementById('datachannel-parameters').value);
-
+     {
+        var parameters = JSON.parse('{"ordered": true}');
+        //parameters = "ordered";
         dc = pc.createDataChannel('chat', parameters);
         dc.onclose = function() {
             clearInterval(dcInterval);
@@ -144,24 +141,27 @@ function start() {
         };
     }
 
+    //var constraints = {
+   //     audio: document.getElementById('use-audio').checked,
+  //      video: false
+ //   };
+///
+   // if (document.getElementById('use-video').checked) {
+  //      var resolution = document.getElementById('video-resolution').value;
+  //      if (resolution) {
+  //          resolution = resolution.split('x');
+  //          constraints.video = {
+  //              width: parseInt(resolution[0], 0),
+  //              height: parseInt(resolution[1], 0)
+  //          };
+   //     } else {
+   //         constraints.video = true;
+   //     }
+   // }
     var constraints = {
-        audio: document.getElementById('use-audio').checked,
-        video: false
+        audio: false,
+        video: true
     };
-
-    if (document.getElementById('use-video').checked) {
-        var resolution = document.getElementById('video-resolution').value;
-        if (resolution) {
-            resolution = resolution.split('x');
-            constraints.video = {
-                width: parseInt(resolution[0], 0),
-                height: parseInt(resolution[1], 0)
-            };
-        } else {
-            constraints.video = true;
-        }
-    }
-
     if (constraints.audio || constraints.video) {
         if (constraints.video) {
             document.getElementById('media').style.display = 'block';
